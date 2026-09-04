@@ -27,7 +27,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # 구조: { "닉네임": { "job": "직업", "월": "상태", "화": "상태", ... } }
 raid_data = {}
 
-# 💡 직업 선택 드롭다운 메뉴 (보내주신 이미지 기준)
+# 💡 직업 선택 드롭다운 메뉴
 class JobSelect(discord.ui.Select):
     def __init__(self, nickname):
         self.nickname = nickname
@@ -78,7 +78,6 @@ async def 등록시작(ctx, nickname: str):
 # 💡 2단계: 요일별 일정 입력 (예: !일정등록 양도르술사 월요일 월양)
 @bot.command()
 async def 일정등록(ctx, nickname: str, day: str, status: str):
-    # 요일 글자 검증 (월~일 포함 여부)
     valid_days = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일", "월", "화", "수", "목", "금", "토", "일"]
     if day not in valid_days:
         await ctx.send("❌ 올바른 요일을 입력해주세요! (예: 월요일, 화요일 또는 월, 화)")
@@ -105,7 +104,6 @@ async def 현황(ctx):
     
     for nickname, info in raid_data.items():
         job = info.get("job", "미정")
-        # 요일 데이터만 예쁘게 조합
         schedule_list = [f"**{k}**: {v}" for k, v in info.items() if k != "job"]
         schedule_text = " | ".join(schedule_list) if schedule_list else "등록된 일정 없음"
         
