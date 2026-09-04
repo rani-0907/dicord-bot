@@ -1,4 +1,3 @@
-```python
 import os
 import sqlite3
 import threading
@@ -1509,4 +1508,3 @@ if __name__ == "__main__":
             "DISCORD_TOKEN 환경 변수가 "
             "설정되지 않았습니다."
         )
-```
