@@ -68,6 +68,8 @@ def get_db():
 
 def init_db():
     conn = get_db()
+    
+    # 일정 테이블
     conn.execute("""
         CREATE TABLE IF NOT EXISTS schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,10 +84,60 @@ def init_db():
             UNIQUE(guild_id, discord_user_id, nickname, schedule_date, raid)
         )
     """)
+
+    # 유저별 캐릭터 보관 테이블
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS characters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            discord_user_id INTEGER NOT NULL,
+            nickname TEXT NOT NULL,
+            default_job TEXT NOT NULL,
+            UNIQUE(guild_id, discord_user_id, nickname)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
 
+# 캐릭터 관련 DB 함수
+def add_character(guild_id, user_id, nickname, default_job):
+    conn = get_db()
+    try:
+        conn.execute("""
+            INSERT INTO characters (guild_id, discord_user_id, nickname, default_job)
+            VALUES (?, ?, ?, ?)
+        """, (guild_id, user_id, nickname, default_job))
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False
+
+
+def get_user_characters(guild_id, user_id):
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT * FROM characters WHERE guild_id = ? AND discord_user_id = ? ORDER BY nickname ASC
+    """, (guild_id, user_id)).fetchall()
+    conn.close()
+    return rows
+
+
+def delete_character(char_id, user_id):
+    conn = get_db()
+    cursor = conn.execute("""
+        DELETE FROM characters WHERE id = ? AND discord_user_id = ?
+    """, (char_id, user_id))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+# 일정 관련 DB 함수
 def add_schedule(guild_id, user_id, nickname, job, raid, schedule_date):
     conn = get_db()
     now = datetime.now().isoformat()
@@ -180,70 +232,74 @@ def is_server_admin(member):
 
 
 # =========================================================
-# UI 컴포넌트 (Ephemeral 적용)
+# UI 컴포넌트 (캐릭터 선택 -> 레이드 선택 -> 직업 -> 날짜)
 # =========================================================
 
-class RaidSelect(discord.ui.Select):
-    def __init__(self, callback_function):
-        options = [discord.SelectOption(label=raid, value=raid) for raid in RAIDS]
-        super().__init__(placeholder="레이드를 선택하세요", min_values=1, max_values=1, options=options)
-        self.callback_function = callback_function
+# 0단계: 등록된 내 캐릭터 선택
+class CharacterSelect(discord.ui.Select):
+    def __init__(self, characters):
+        options = []
+        for char in characters:
+            options.append(
+                discord.SelectOption(
+                    label=f"{char['nickname']} ({char['default_job']})",
+                    value=str(char['id'])
+                )
+            )
+        super().__init__(placeholder="일정을 등록할 캐릭터를 선택하세요", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        await self.callback_function(interaction, self.values[0])
+        # 선택된 캐릭터 정보 찾기
+        conn = get_db()
+        char = conn.execute("SELECT * FROM characters WHERE id = ?", (int(self.values[0]),)).fetchone()
+        conn.close()
 
+        if not char:
+            await interaction.response.edit_message(content="❌ 캐릭터 정보를 찾을 수 없습니다.", view=None)
+            return
 
-class RaidSelectView(discord.ui.View):
-    def __init__(self, nickname, user_id, guild_id, mode="register", schedule_id=None):
-        super().__init__(timeout=180)
-        self.nickname = nickname
-        self.user_id = user_id
-        self.guild_id = guild_id
-        self.mode = mode
-        self.schedule_id = schedule_id
-        self.add_item(RaidSelect(self.raid_selected))
-
-    async def raid_selected(self, interaction, raid):
+        # 다음 단계(레이드 선택)로 이동하며 캐릭터 닉네임과 기본 직업을 전달
         await interaction.response.edit_message(
-            content=f"선택 레이드: **{raid}**\n이제 직업을 선택해주세요.",
-            view=JobSelectView(self.nickname, self.user_id, self.guild_id, raid, self.mode, self.schedule_id)
+            content=f"선택 캐릭터: **{char['nickname']}** ({char['default_job']})\n참여할 **레이드**를 선택해주세요.",
+            view=RaidSelectView(nickname=char['nickname'], job=char['default_job'], user_id=interaction.user.id, guild_id=interaction.guild.id, mode="register")
         )
 
 
-class JobSelect(discord.ui.Select):
-    def __init__(self, callback_function):
-        options = [discord.SelectOption(label=job, value=job) for job in JOBS]
-        super().__init__(placeholder="직업을 선택하세요", min_values=1, max_values=1, options=options)
-        self.callback_function = callback_function
-
-    async def callback(self, interaction: discord.Interaction):
-        await self.callback_function(interaction, self.values[0])
+class CharacterSelectView(discord.ui.View):
+    def __init__(self, characters):
+        super().__init__(timeout=180)
+        self.add_item(CharacterSelect(characters))
 
 
-class JobSelectView(discord.ui.View):
-    def __init__(self, nickname, user_id, guild_id, raid, mode="register", schedule_id=None):
+# 1단계: 레이드 선택
+class RaidSelect(discord.ui.Select):
+    def __init__(self):
+        options = [discord.SelectOption(label=raid, value=raid) for raid in RAIDS]
+        super().__init__(placeholder="레이드를 선택하세요", min_values=1, max_values=1, options=options)
+
+class RaidSelectView(discord.ui.View):
+    def __init__(self, nickname, job, user_id, guild_id, mode="register", schedule_id=None):
         super().__init__(timeout=180)
         self.nickname = nickname
+        self.job = job
         self.user_id = user_id
         self.guild_id = guild_id
-        self.raid = raid
         self.mode = mode
         self.schedule_id = schedule_id
-        self.add_item(JobSelect(self.job_selected))
+        
+        self.select_item = RaidSelect()
+        self.select_item.callback = self.raid_selected
+        self.add_item(self.select_item)
 
-    async def job_selected(self, interaction, job):
-        if self.mode == "register":
-            await interaction.response.edit_message(
-                content=f"레이드: **{self.raid}** / 직업: **{job}** 선택 완료!\n이제 날짜를 선택해주세요.",
-                view=DateSelectView(self.nickname, self.user_id, self.guild_id, self.raid, job, "register")
-            )
-        elif self.mode == "edit":
-            await interaction.response.edit_message(
-                content=f"새 레이드: **{self.raid}** / 새 직업: **{job}**\n새 날짜를 선택해주세요.",
-                view=DateSelectView(self.nickname, self.user_id, self.guild_id, self.raid, job, "edit", self.schedule_id)
-            )
+    async def raid_selected(self, interaction: discord.Interaction):
+        raid = self.select_item.values[0]
+        await interaction.response.edit_message(
+            content=f"캐릭터: **{self.nickname}**\n레이드: **{raid}** / 직업: **{self.job}**\n이제 날짜를 선택해주세요.",
+            view=DateSelectView(self.nickname, self.user_id, self.guild_id, raid, self.job, self.mode, self.schedule_id)
+        )
 
 
+# 2단계: 날짜 선택 및 완료
 class DateSelectView(discord.ui.View):
     def __init__(self, nickname, user_id, guild_id, raid, job, mode="register", schedule_id=None):
         super().__init__(timeout=180)
@@ -315,8 +371,28 @@ class DateSelectView(discord.ui.View):
         self.add_item(confirm_button)
 
 
+# 캐릭터 삭제용 뷰
+class CharacterDeleteSelect(discord.ui.Select):
+    def __init__(self, characters):
+        options = [discord.SelectOption(label=f"{c['nickname']} ({c['default_job']})", value=str(c['id'])) for c in characters]
+        super().__init__(placeholder="삭제할 캐릭터를 선택하세요", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        char_id = int(self.values[0])
+        if delete_character(char_id, interaction.user.id):
+            await interaction.response.edit_message(content="✅ 캐릭터가 삭제되었습니다.", view=None)
+        else:
+            await interaction.response.edit_message(content="❌ 삭제 실패", view=None)
+
+class CharacterDeleteView(discord.ui.View):
+    def __init__(self, characters):
+        super().__init__(timeout=60)
+        self.add_item(CharacterDeleteSelect(characters))
+
+
+# 일정 수정/삭제 선택 뷰
 class ScheduleSelect(discord.ui.Select):
-    def __init__(self, schedules, callback_function):
+    def __init__(self, schedules):
         options = []
         for schedule in schedules[:25]:
             options.append(
@@ -326,20 +402,18 @@ class ScheduleSelect(discord.ui.Select):
                 )
             )
         super().__init__(placeholder="일정을 선택하세요", min_values=1, max_values=1, options=options)
-        self.callback_function = callback_function
-
-    async def callback(self, interaction: discord.Interaction):
-        await self.callback_function(interaction, int(self.values[0]))
-
 
 class ScheduleSelectView(discord.ui.View):
     def __init__(self, schedules, mode="edit"):
         super().__init__(timeout=180)
         self.schedules = schedules
         self.mode = mode
-        self.add_item(ScheduleSelect(schedules, self.schedule_selected))
+        self.select_item = ScheduleSelect(schedules)
+        self.select_item.callback = self.schedule_selected
+        self.add_item(self.select_item)
 
-    async def schedule_selected(self, interaction, schedule_id):
+    async def schedule_selected(self, interaction: discord.Interaction):
+        schedule_id = int(self.select_item.values[0])
         schedule = get_schedule(schedule_id)
         if not schedule or schedule["guild_id"] != interaction.guild.id:
             await interaction.response.send_message("❌ 일정을 찾을 수 없습니다.", ephemeral=True)
@@ -350,8 +424,8 @@ class ScheduleSelectView(discord.ui.View):
 
         if self.mode == "edit":
             await interaction.response.send_message(
-                f"수정할 일정\n현재 레이드: **{schedule['raid']}**\n새 레이드를 선택해주세요.",
-                view=RaidSelectView(schedule["nickname"], schedule["discord_user_id"], schedule["guild_id"], mode="edit", schedule_id=schedule["id"]),
+                f"수정할 일정\n현재 캐릭터: **{schedule['nickname']}** ({schedule['job']})\n새 레이드를 선택해주세요.",
+                view=RaidSelectView(schedule["nickname"], schedule["job"], schedule["discord_user_id"], schedule["guild_id"], mode="edit", schedule_id=schedule["id"]),
                 ephemeral=True
             )
         elif self.mode == "delete":
@@ -386,7 +460,7 @@ class DeleteConfirmView(discord.ui.View):
 
 
 # =========================================================
-# Bot 설정 및 슬래시 커맨드 (Slash Commands)
+# Bot 설정 및 슬래시 커맨드
 # =========================================================
 
 intents = discord.Intents.default()
@@ -405,20 +479,45 @@ async def on_ready():
     print(f"로그인 성공: {bot.user}")
 
 
-@bot.tree.command(name="등록", description="레이드 일정을 등록합니다.")
-@app_commands.describe(nickname="게임 내 닉네임")
-async def slash_register(interaction: discord.Interaction, nickname: str):
-    # ephemeral=True로 설정하여 명령어 입력자에게만 오직 보임
-    await interaction.response.send_message(
-        f"**{nickname.strip()}** 님의 일정을 등록합니다.\n참여할 **레이드**를 선택해주세요.",
-        view=RaidSelectView(
-            nickname=nickname.strip(),
-            user_id=interaction.user.id,
-            guild_id=interaction.guild.id,
-            mode="register"
-        ),
-        ephemeral=True
-    )
+# 1. 캐릭터 등록 명령어
+@bot.tree.command(name="캐릭터등록", description="사용할 캐릭터와 기본 직업을 등록합니다.")
+@app_commands.describe(nickname="게임 내 닉네임", job="캐릭터 직업")
+@app_commands.choices(job=[app_commands.Choice(name=j, value=j) for j in JOBS])
+async def slash_register_character(interaction: discord.Interaction, nickname: str, job: str):
+    success = add_character(interaction.guild.id, interaction.user.id, nickname.strip(), job)
+    if not success:
+        await interaction.response.send_message(f"❌ 이미 등록되어 있거나 중복된 닉네임입니다: **{nickname.strip()}**", ephemeral=True)
+        return
+    await interaction.response.send_message(f"✅ 캐릭터가 등록되었습니다!\n- 닉네임: **{nickname.strip()}**\n- 직업: **{job}**\n이제 `/등록` 명령어로 편하게 일정을 잡아보세요.", ephemeral=True)
+
+
+# 2. 캐릭터 삭제/관리 명령어
+@bot.tree.command(name="캐릭터관리", description="등록한 내 캐릭터를 관리(삭제)합니다.")
+async def slash_manage_character(interaction: discord.Interaction):
+    chars = get_user_schedules(interaction.guild.id, interaction.user.id) # user chars check
+    conn = get_db()
+    chars = conn.execute("SELECT * FROM characters WHERE guild_id = ? AND discord_user_id = ?", (interaction.guild.id, interaction.user.id)).fetchall()
+    conn.close()
+
+    if not chars:
+        await interaction.response.send_message("❌ 등록된 캐릭터가 없습니다. `/캐릭터등록`으로 먼저 캐릭터를 등록해주세요.", ephemeral=True)
+        return
+    await interaction.response.send_message("🗑️ 삭제할 캐릭터를 선택해주세요.", view=CharacterDeleteView(chars), ephemeral=True)
+
+
+# 3. 일정 등록 명령어 (캐릭터 선택 방식)
+@bot.tree.command(name="등록", description="등록된 캐릭터를 선택해 레이드 일정을 등록합니다.")
+async def slash_register(interaction: discord.Interaction):
+    chars = get_user_schedules(interaction.guild.id, interaction.user.id)
+    conn = get_db()
+    chars = conn.execute("SELECT * FROM characters WHERE guild_id = ? AND discord_user_id = ?", (interaction.guild.id, interaction.user.id)).fetchall()
+    conn.close()
+
+    if not chars:
+        await interaction.response.send_message("❌ 등록된 캐릭터가 없습니다!\n먼저 `/캐릭터등록 [닉네임] [직업]` 명령어로 캐릭터를 등록해주세요.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("📌 일정을 등록할 캐릭터를 선택해주세요.", view=CharacterSelectView(chars), ephemeral=True)
 
 
 @bot.tree.command(name="일정", description="서버 또는 특정 닉네임의 일정을 확인합니다.")
