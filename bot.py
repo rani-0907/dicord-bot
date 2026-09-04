@@ -15,13 +15,12 @@ def home():
 
 
 def run_flask():
-  # Render는 기본적으로 8080 포트를 사용합니다.
   app.run(host="0.0.0.0", port=8080)
 
 
 # 2. 디스코드 봇 설정
 intents = discord.Intents.default()
-intents.message_content = True  # 메시지 내용 읽기 권한 필요
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
@@ -63,8 +62,8 @@ class DateSelectView(discord.ui.View):
     button.callback = button_callback
     self.add_item(button)
 
-  # 하단에 '확인' 버튼 추가
-  @discord.ui.Button(
+  # 하단에 '확인' 버튼 추가 (소문자 discord.ui.button 사용)
+  @discord.ui.button(
       label="선택 완료 (확인)", style=discord.ButtonStyle.success, row=4
   )
   async def confirm_button(
@@ -92,27 +91,21 @@ async def on_ready():
 
 @bot.command(name="일정")
 async def schedule_command(ctx, *, nickname: str = "라니새싹"):
-  """!일정 명령어를 치면 오늘부터 7일간의 달력 버튼이 뜸"""
   view = DateSelectView(nickname)
   await ctx.send(
       "📅 등록할 날짜를 선택한 뒤 **선택 완료 (확인)** 버튼을 눌러주세요:", view=view
   )
 
 
-# 5. 실행부 (Flask 백그라운드 스레드 + 디스코드 봇 실행)
+# 5. 실행부
 if __name__ == "__main__":
-  # Flask 서버를 별도 스레드로 실행 (Render 차단 방지)
   flask_thread = threading.Thread(target=run_flask)
   flask_thread.daemon = True
   flask_thread.start()
 
-  # Render 환경변수에 등록된 디스코드 토큰 가져오기
   token = os.environ.get("DISCORD_TOKEN")
 
   if token:
     bot.run(token)
   else:
-    print(
-        "오류: DISCORD_TOKEN 환경 변수가 설정되지 않았습니다. Render 설정에서"
-        " 토큰을 확인해주세요."
-    )
+    print("오류: DISCORD_TOKEN 환경 변수가 설정되지 않았습니다.")
