@@ -9,312 +9,10 @@ from discord.ext import commands
 
 
 # =========================================================
-# 1. 기본 설정
+# 기본 설정
 # =========================================================
 
 DB_FILE = "schedule.db"
-
-
-# =========================================================
-# 2. Render 헬스체크용 Flask 서버
-# =========================================================
-
-app = Flask(__name__)
-
-
-@app.route("/")
-def home():
-    return "Bot is running!"
-
-
-def run_flask():
-    app.run(
-        host="0.0.0.0",
-        port=8080
-    )
-
-
-# =========================================================
-# 3. SQLite DB
-# =========================================================
-
-def get_db():
-    conn = sqlite3.connect(DB_FILE)
-
-    # DB 결과를 dict처럼 사용할 수 있게 설정
-    conn.row_factory = sqlite3.Row
-
-    return conn
-
-
-def init_db():
-    conn = get_db()
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS schedules (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            discord_user_id INTEGER NOT NULL,
-
-            nickname TEXT NOT NULL,
-
-            job TEXT NOT NULL,
-
-            schedule_date TEXT NOT NULL,
-
-            created_at TEXT NOT NULL,
-
-            updated_at TEXT NOT NULL,
-
-            UNIQUE(
-                discord_user_id,
-                nickname,
-                schedule_date
-            )
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-    print("SQLite DB 초기화 완료")
-
-
-# =========================================================
-# 4. DB - 일정 등록
-# =========================================================
-
-def add_schedule(
-    user_id,
-    nickname,
-    job,
-    schedule_date
-):
-    conn = get_db()
-
-    now = datetime.now().isoformat(
-        timespec="seconds"
-    )
-
-    try:
-
-        cursor = conn.execute(
-            """
-            INSERT INTO schedules (
-                discord_user_id,
-                nickname,
-                job,
-                schedule_date,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                nickname,
-                job,
-                schedule_date,
-                now,
-                now
-            )
-        )
-
-        conn.commit()
-
-        schedule_id = cursor.lastrowid
-
-        return schedule_id
-
-    except sqlite3.IntegrityError:
-
-        # 같은 사람이 같은 닉네임으로
-        # 같은 날짜에 이미 등록한 경우
-        return None
-
-    finally:
-
-        conn.close()
-
-
-# =========================================================
-# 5. DB - 일정 조회
-# =========================================================
-
-def get_user_schedules(user_id):
-
-    conn = get_db()
-
-    rows = conn.execute(
-        """
-        SELECT *
-        FROM schedules
-        WHERE discord_user_id = ?
-        ORDER BY schedule_date ASC, nickname ASC
-        """,
-        (user_id,)
-    ).fetchall()
-
-    conn.close()
-
-    return rows
-
-
-def get_nickname_schedules(
-    user_id,
-    nickname
-):
-
-    conn = get_db()
-
-    rows = conn.execute(
-        """
-        SELECT *
-        FROM schedules
-        WHERE discord_user_id = ?
-        AND nickname = ?
-        ORDER BY schedule_date ASC
-        """,
-        (
-            user_id,
-            nickname
-        )
-    ).fetchall()
-
-    conn.close()
-
-    return rows
-
-
-def get_all_schedules():
-
-    conn = get_db()
-
-    rows = conn.execute(
-        """
-        SELECT *
-        FROM schedules
-        ORDER BY
-            schedule_date ASC,
-            nickname ASC
-        """
-    ).fetchall()
-
-    conn.close()
-
-    return rows
-
-
-# =========================================================
-# 6. DB - 특정 일정 조회
-# =========================================================
-
-def get_schedule(schedule_id):
-
-    conn = get_db()
-
-    row = conn.execute(
-        """
-        SELECT *
-        FROM schedules
-        WHERE id = ?
-        """,
-        (schedule_id,)
-    ).fetchone()
-
-    conn.close()
-
-    return row
-
-
-# =========================================================
-# 7. DB - 일정 수정
-# =========================================================
-
-def update_schedule(
-    schedule_id,
-    job,
-    schedule_date
-):
-
-    conn = get_db()
-
-    now = datetime.now().isoformat(
-        timespec="seconds"
-    )
-
-    try:
-
-        conn.execute(
-            """
-            UPDATE schedules
-            SET
-                job = ?,
-                schedule_date = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                job,
-                schedule_date,
-                now,
-                schedule_id
-            )
-        )
-
-        conn.commit()
-
-        return True
-
-    except sqlite3.IntegrityError:
-
-        # 수정하려는 날짜에
-        # 이미 같은 캐릭터가 등록되어 있는 경우
-        return False
-
-    finally:
-
-        conn.close()
-
-
-# =========================================================
-# 8. DB - 일정 삭제
-# =========================================================
-
-def delete_schedule(schedule_id):
-
-    conn = get_db()
-
-    conn.execute(
-        """
-        DELETE FROM schedules
-        WHERE id = ?
-        """,
-        (schedule_id,)
-    )
-
-    conn.commit()
-
-    conn.close()
-
-
-# =========================================================
-# 9. Discord Bot 설정
-# =========================================================
-
-intents = discord.Intents.default()
-
-intents.message_content = True
-
-bot = commands.Bot(
-    command_prefix="!",
-    intents=intents
-)
-
-
-# =========================================================
-# 10. 직업 목록
-# =========================================================
 
 JOBS = [
     "드루이드",
@@ -330,847 +28,897 @@ JOBS = [
 
 
 # =========================================================
-# 11. 날짜 표시
+# Flask - Render 포트 유지용
 # =========================================================
 
-def format_date(date_text):
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+    return "Bot is running!"
+
+
+def run_flask():
+    app.run(host="0.0.0.0", port=8080)
+
+
+# =========================================================
+# Database
+# =========================================================
+
+def get_db():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            discord_user_id INTEGER NOT NULL,
+            nickname TEXT NOT NULL,
+            job TEXT NOT NULL,
+            schedule_date TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(guild_id, discord_user_id, nickname, schedule_date)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+# =========================================================
+# Database 함수
+# =========================================================
+
+def add_schedule(guild_id, user_id, nickname, job, schedule_date):
+    conn = get_db()
+
+    now = datetime.now().isoformat()
 
     try:
+        cursor = conn.execute("""
+            INSERT INTO schedules (
+                guild_id,
+                discord_user_id,
+                nickname,
+                job,
+                schedule_date,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            guild_id,
+            user_id,
+            nickname,
+            job,
+            schedule_date,
+            now,
+            now
+        ))
 
-        date_obj = datetime.strptime(
-            date_text,
-            "%Y-%m-%d"
-        )
+        conn.commit()
+        schedule_id = cursor.lastrowid
 
-        return date_obj.strftime(
-            "%m/%d (%a)"
-        )
+        conn.close()
 
-    except Exception:
+        return schedule_id
 
-        return date_text
+    except sqlite3.IntegrityError:
+        conn.close()
+        return None
+
+
+def get_user_schedules(guild_id, user_id):
+    conn = get_db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM schedules
+        WHERE guild_id = ?
+          AND discord_user_id = ?
+        ORDER BY schedule_date ASC, nickname ASC
+    """, (
+        guild_id,
+        user_id
+    )).fetchall()
+
+    conn.close()
+
+    return rows
+
+
+def get_all_schedules(guild_id):
+    conn = get_db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM schedules
+        WHERE guild_id = ?
+        ORDER BY schedule_date ASC, nickname ASC
+    """, (
+        guild_id,
+    )).fetchall()
+
+    conn.close()
+
+    return rows
+
+
+def get_schedule(schedule_id):
+    conn = get_db()
+
+    row = conn.execute("""
+        SELECT *
+        FROM schedules
+        WHERE id = ?
+    """, (
+        schedule_id,
+    )).fetchone()
+
+    conn.close()
+
+    return row
+
+
+def update_schedule(schedule_id, job, schedule_date):
+    conn = get_db()
+
+    now = datetime.now().isoformat()
+
+    try:
+        cursor = conn.execute("""
+            UPDATE schedules
+            SET job = ?,
+                schedule_date = ?,
+                updated_at = ?
+            WHERE id = ?
+        """, (
+            job,
+            schedule_date,
+            now,
+            schedule_id
+        ))
+
+        conn.commit()
+
+        changed = cursor.rowcount > 0
+
+        conn.close()
+
+        return changed
+
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False
+
+
+def delete_schedule(schedule_id):
+    conn = get_db()
+
+    cursor = conn.execute("""
+        DELETE FROM schedules
+        WHERE id = ?
+    """, (
+        schedule_id,
+    ))
+
+    conn.commit()
+
+    deleted = cursor.rowcount > 0
+
+    conn.close()
+
+    return deleted
 
 
 # =========================================================
-# 12. 날짜 선택 View
+# 날짜 관련
+# =========================================================
+
+def format_date(date_string):
+    date_obj = datetime.strptime(date_string, "%Y-%m-%d")
+    weekday = ["월", "화", "수", "목", "금", "토", "일"]
+
+    return date_obj.strftime("%m/%d") + f" ({weekday[date_obj.weekday()]})"
+
+
+def get_date_options():
+    today = datetime.now().date()
+
+    dates = []
+
+    for i in range(7):
+        date_obj = today + timedelta(days=i)
+
+        dates.append({
+            "value": date_obj.strftime("%Y-%m-%d"),
+            "label": date_obj.strftime("%m/%d") + " (" + ["월", "화", "수", "목", "금", "토", "일"][date_obj.weekday()] + ")"
+        })
+
+    return dates
+
+
+# =========================================================
+# 권한 확인
+# =========================================================
+
+def is_server_admin(member):
+    if not isinstance(member, discord.Member):
+        return False
+
+    return member.guild_permissions.manage_guild
+
+
+# =========================================================
+# 직업 선택
+# =========================================================
+
+class JobSelect(discord.ui.Select):
+
+    def __init__(self, callback_function):
+        self.callback_function = callback_function
+
+        options = []
+
+        for job in JOBS:
+            options.append(
+                discord.SelectOption(
+                    label=job,
+                    value=job
+                )
+            )
+
+        super().__init__(
+            placeholder="직업을 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_job = self.values[0]
+
+        await self.callback_function(
+            interaction,
+            selected_job
+        )
+
+
+class JobSelectView(discord.ui.View):
+
+    def __init__(
+        self,
+        nickname,
+        user_id,
+        guild_id,
+        mode="register",
+        schedule_id=None
+    ):
+        super().__init__(timeout=180)
+
+        self.nickname = nickname
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.mode = mode
+        self.schedule_id = schedule_id
+
+        self.add_item(
+            JobSelect(self.job_selected)
+        )
+
+    async def job_selected(self, interaction, job):
+
+        if self.mode == "register":
+
+            await interaction.response.send_message(
+                f"직업 **{job}** 선택 완료!\n"
+                f"이제 날짜를 선택해주세요.",
+                view=DateSelectView(
+                    nickname=self.nickname,
+                    user_id=self.user_id,
+                    guild_id=self.guild_id,
+                    job=job,
+                    mode="register"
+                ),
+                ephemeral=True
+            )
+
+        elif self.mode == "edit":
+
+            await interaction.response.send_message(
+                f"새 직업: **{job}**\n"
+                f"새 날짜를 선택해주세요.",
+                view=DateSelectView(
+                    nickname=self.nickname,
+                    user_id=self.user_id,
+                    guild_id=self.guild_id,
+                    job=job,
+                    mode="edit",
+                    schedule_id=self.schedule_id
+                ),
+                ephemeral=True
+            )
+
+
+# =========================================================
+# 날짜 선택
 # =========================================================
 
 class DateSelectView(discord.ui.View):
 
     def __init__(
         self,
-        user_id,
         nickname,
+        user_id,
+        guild_id,
         job,
-        edit_schedule_id=None
+        mode="register",
+        schedule_id=None
     ):
-
-        super().__init__(
-            timeout=180
-        )
-
-        self.user_id = user_id
+        super().__init__(timeout=180)
 
         self.nickname = nickname
-
+        self.user_id = user_id
+        self.guild_id = guild_id
         self.job = job
-
-        self.edit_schedule_id = edit_schedule_id
+        self.mode = mode
+        self.schedule_id = schedule_id
 
         self.selected_date = None
 
-        # 오늘부터 7일
-        today = datetime.now().date()
+        dates = get_date_options()
 
-        for i in range(7):
+        for index, date_info in enumerate(dates):
 
-            target_date = today + timedelta(
-                days=i
+            button = discord.ui.Button(
+                label=date_info["label"],
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"schedule_date_{index}"
             )
 
-            label = target_date.strftime(
-                "%m/%d (%a)"
-            )
+            async def button_callback(
+                interaction,
+                date_value=date_info["value"],
+                button_ref=button
+            ):
+                self.selected_date = date_value
 
-            self.add_date_button(
-                target_date,
-                label
-            )
+                for child in self.children:
+                    if isinstance(child, discord.ui.Button):
+                        child.style = discord.ButtonStyle.secondary
 
+                button_ref.style = discord.ButtonStyle.primary
 
-    def add_date_button(
-        self,
-        target_date,
-        label
-    ):
+                await interaction.response.edit_message(
+                    content=(
+                        f"닉네임: **{self.nickname}**\n"
+                        f"직업: **{self.job}**\n"
+                        f"선택한 날짜: **{format_date(self.selected_date)}**\n\n"
+                        f"아래 **등록 완료** 버튼을 눌러주세요."
+                    ),
+                    view=self
+                )
 
-        button = discord.ui.Button(
-            label=label,
-            style=discord.ButtonStyle.secondary,
+            button.callback = button_callback
 
-            # 5개씩 한 줄
-            row=len(self.children) // 5
+            self.add_item(button)
+
+        confirm_button = discord.ui.Button(
+            label="등록 완료",
+            style=discord.ButtonStyle.success,
+            row=2
         )
 
+        async def confirm_callback(interaction):
 
-        async def button_callback(
-            interaction: discord.Interaction
-        ):
-
-            # 다른 사람이 버튼을 누르는 것 방지
-            if interaction.user.id != self.user_id:
+            if self.selected_date is None:
 
                 await interaction.response.send_message(
-                    "❌ 이 메뉴를 만든 사람만 사용할 수 있습니다.",
+                    "❌ 날짜를 먼저 선택해주세요.",
                     ephemeral=True
                 )
 
                 return
 
+            if self.mode == "register":
 
-            # 모든 날짜 버튼 초기화
-            for child in self.children:
-
-                if isinstance(
-                    child,
-                    discord.ui.Button
-                ):
-
-                    if child.label != "등록 완료":
-
-                        child.style = (
-                            discord.ButtonStyle.secondary
-                        )
-
-
-            # 선택한 날짜 강조
-            button.style = (
-                discord.ButtonStyle.primary
-            )
-
-
-            self.selected_date = (
-                target_date.strftime(
-                    "%Y-%m-%d"
+                result = add_schedule(
+                    self.guild_id,
+                    self.user_id,
+                    self.nickname,
+                    self.job,
+                    self.selected_date
                 )
-            )
 
+                if result is None:
 
-            await interaction.response.edit_message(
-                view=self
-            )
+                    await interaction.response.edit_message(
+                        content=(
+                            "❌ 이미 같은 날짜에 등록된 일정이 있습니다.\n\n"
+                            f"닉네임: **{self.nickname}**\n"
+                            f"날짜: **{format_date(self.selected_date)}**"
+                        ),
+                        view=None
+                    )
 
-
-        button.callback = button_callback
-
-        self.add_item(button)
-
-
-    # =====================================================
-    # 날짜 선택 완료
-    # =====================================================
-
-    @discord.ui.button(
-        label="등록 완료",
-        emoji="✅",
-        style=discord.ButtonStyle.success,
-        row=4
-    )
-    async def confirm_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        if interaction.user.id != self.user_id:
-
-            await interaction.response.send_message(
-                "❌ 이 메뉴를 만든 사람만 사용할 수 있습니다.",
-                ephemeral=True
-            )
-
-            return
-
-
-        if not self.selected_date:
-
-            await interaction.response.send_message(
-                "📅 날짜를 먼저 선택해주세요!",
-                ephemeral=True
-            )
-
-            return
-
-
-        # =================================================
-        # 수정
-        # =================================================
-
-        if self.edit_schedule_id is not None:
-
-            schedule = get_schedule(
-                self.edit_schedule_id
-            )
-
-
-            if schedule is None:
+                    return
 
                 await interaction.response.edit_message(
-                    content="❌ 해당 일정을 찾을 수 없습니다.",
+                    content=(
+                        "✅ 일정이 등록되었습니다!\n\n"
+                        f"닉네임: **{self.nickname}**\n"
+                        f"직업: **{self.job}**\n"
+                        f"날짜: **{format_date(self.selected_date)}**"
+                    ),
                     view=None
                 )
 
-                return
+            elif self.mode == "edit":
 
+                schedule = get_schedule(self.schedule_id)
 
-            # 본인 일정인지 확인
-            # 관리자는 다른 사람 일정도 가능
-            if (
-                schedule["discord_user_id"]
-                != interaction.user.id
-                and
-                not interaction.user.guild_permissions.manage_guild
-            ):
+                if schedule is None:
 
-                await interaction.response.send_message(
-                    "❌ 이 일정을 수정할 권한이 없습니다.",
-                    ephemeral=True
+                    await interaction.response.edit_message(
+                        content="❌ 해당 일정을 찾을 수 없습니다.",
+                        view=None
+                    )
+
+                    return
+
+                # 본인 일정인지 다시 한번 확인
+                if schedule["guild_id"] != self.guild_id:
+
+                    await interaction.response.edit_message(
+                        content="❌ 다른 서버의 일정은 수정할 수 없습니다.",
+                        view=None
+                    )
+
+                    return
+
+                if schedule["discord_user_id"] != self.user_id:
+
+                    # 관리자가 수정하는 경우
+                    member = interaction.guild.get_member(self.user_id)
+
+                    # 여기서는 user_id가 실제 수정 대상 사용자이므로
+                    # 관리자 여부는 interaction.user 기준으로 확인
+                    if not is_server_admin(interaction.user):
+
+                        await interaction.response.edit_message(
+                            content="❌ 다른 사람의 일정은 수정할 수 없습니다.",
+                            view=None
+                        )
+
+                        return
+
+                success = update_schedule(
+                    self.schedule_id,
+                    self.job,
+                    self.selected_date
                 )
 
-                return
+                if not success:
 
+                    await interaction.response.edit_message(
+                        content=(
+                            "❌ 수정할 수 없습니다.\n"
+                            "같은 닉네임으로 해당 날짜에 이미 일정이 있을 수 있습니다."
+                        ),
+                        view=None
+                    )
 
-            success = update_schedule(
-                self.edit_schedule_id,
-                self.job,
-                self.selected_date
-            )
+                    return
 
-
-            if not success:
-
-                await interaction.response.send_message(
-                    (
-                        "⚠️ 수정할 날짜에 "
-                        "이미 같은 캐릭터가 등록되어 있습니다."
+                await interaction.response.edit_message(
+                    content=(
+                        "✅ 일정이 수정되었습니다!\n\n"
+                        f"닉네임: **{schedule['nickname']}**\n"
+                        f"직업: **{self.job}**\n"
+                        f"날짜: **{format_date(self.selected_date)}**"
                     ),
-                    ephemeral=True
+                    view=None
                 )
 
-                return
+        confirm_button.callback = confirm_callback
 
-
-            await interaction.response.edit_message(
-                content=(
-                    "✅ **일정 수정 완료!**\n\n"
-
-                    f"👤 닉네임: **{self.nickname}**\n"
-
-                    f"⚔️ 직업: **{self.job}**\n"
-
-                    f"📅 날짜: **{format_date(self.selected_date)}**"
-                ),
-                view=None
-            )
-
-            self.stop()
-
-            return
-
-
-        # =================================================
-        # 신규 등록
-        # =================================================
-
-        schedule_id = add_schedule(
-            interaction.user.id,
-            self.nickname,
-            self.job,
-            self.selected_date
-        )
-
-
-        if schedule_id is None:
-
-            await interaction.response.send_message(
-                (
-                    "⚠️ 이미 해당 캐릭터가 "
-                    "그 날짜에 등록되어 있습니다.\n\n"
-
-                    f"👤 닉네임: **{self.nickname}**\n"
-                    f"📅 날짜: **{format_date(self.selected_date)}**"
-                ),
-                ephemeral=True
-            )
-
-            return
-
-
-        await interaction.response.edit_message(
-            content=(
-                "✅ **일정 등록 완료!**\n\n"
-
-                f"👤 닉네임: **{self.nickname}**\n"
-
-                f"⚔️ 직업: **{self.job}**\n"
-
-                f"📅 날짜: **{format_date(self.selected_date)}**"
-            ),
-            view=None
-        )
-
-        self.stop()
+        self.add_item(confirm_button)
 
 
 # =========================================================
-# 13. 직업 선택
+# 일정 선택
 # =========================================================
 
-class JobSelect(discord.ui.Select):
+class ScheduleSelect(discord.ui.Select):
 
-    def __init__(
-        self,
-        user_id,
-        nickname,
-        edit_schedule_id=None
-    ):
+    def __init__(self, schedules, callback_function):
 
-        self.user_id = user_id
-
-        self.nickname = nickname
-
-        self.edit_schedule_id = edit_schedule_id
-
+        self.callback_function = callback_function
 
         options = []
 
-        for job in JOBS:
+        for schedule in schedules[:25]:
 
             options.append(
                 discord.SelectOption(
-                    label=job,
-                    description=f"{job} 선택"
+                    label=(
+                        f"{schedule['nickname']} / "
+                        f"{schedule['job']} / "
+                        f"{format_date(schedule['schedule_date'])}"
+                    )[:100],
+                    value=str(schedule["id"])
                 )
             )
 
-
         super().__init__(
-            placeholder="직업을 선택해주세요...",
-
+            placeholder="일정을 선택하세요",
             min_values=1,
-
             max_values=1,
-
             options=options
         )
 
+    async def callback(self, interaction: discord.Interaction):
 
-    async def callback(
-        self,
-        interaction: discord.Interaction
-    ):
+        schedule_id = int(self.values[0])
 
-        # 사용자 확인
-        if interaction.user.id != self.user_id:
-
-            await interaction.response.send_message(
-                "❌ 이 메뉴를 만든 사람만 사용할 수 있습니다.",
-                ephemeral=True
-            )
-
-            return
-
-
-        selected_job = self.values[0]
-
-
-        # 날짜 선택 화면
-        date_view = DateSelectView(
-            interaction.user.id,
-            self.nickname,
-            selected_job,
-            self.edit_schedule_id
+        await self.callback_function(
+            interaction,
+            schedule_id
         )
 
-
-        if self.edit_schedule_id is not None:
-
-            title = "✏️ **일정 수정**"
-
-        else:
-
-            title = "📝 **일정 등록**"
-
-
-        await interaction.response.edit_message(
-            content=(
-                f"{title}\n\n"
-
-                f"👤 닉네임: **{self.nickname}**\n"
-
-                f"⚔️ 직업: **{selected_job}**\n\n"
-
-                "📅 날짜를 선택해주세요."
-            ),
-            view=date_view
-        )
-
-
-# =========================================================
-# 14. 직업 선택 View
-# =========================================================
-
-class JobSelectView(discord.ui.View):
-
-    def __init__(
-        self,
-        user_id,
-        nickname,
-        edit_schedule_id=None
-    ):
-
-        super().__init__(
-            timeout=180
-        )
-
-        self.add_item(
-            JobSelect(
-                user_id,
-                nickname,
-                edit_schedule_id
-            )
-        )
-
-
-# =========================================================
-# 15. 일정 선택 View
-# =========================================================
 
 class ScheduleSelectView(discord.ui.View):
 
     def __init__(
         self,
         schedules,
-        mode="edit"
+        mode="edit",
+        requester_id=None
     ):
-
-        super().__init__(
-            timeout=180
-        )
+        super().__init__(timeout=180)
 
         self.schedules = schedules
-
         self.mode = mode
+        self.requester_id = requester_id
 
-
-        options = []
-
-
-        # Discord Select는 최대 25개
-        for schedule in schedules[:25]:
-
-            label = (
-                f"{format_date(schedule['schedule_date'])}"
-                f" - {schedule['nickname']}"
+        self.add_item(
+            ScheduleSelect(
+                schedules,
+                self.schedule_selected
             )
-
-
-            description = (
-                f"직업: {schedule['job']}"
-            )
-
-
-            options.append(
-                discord.SelectOption(
-                    label=label[:100],
-                    description=description[:100],
-                    value=str(schedule["id"])
-                )
-            )
-
-
-        select = discord.ui.Select(
-            placeholder="관리할 일정을 선택해주세요...",
-
-            min_values=1,
-
-            max_values=1,
-
-            options=options
         )
 
+    async def schedule_selected(
+        self,
+        interaction,
+        schedule_id
+    ):
 
-        async def callback(
-            interaction: discord.Interaction
-        ):
+        schedule = get_schedule(schedule_id)
 
-            schedule_id = int(
-                select.values[0]
+        if schedule is None:
+
+            await interaction.response.send_message(
+                "❌ 일정을 찾을 수 없습니다.",
+                ephemeral=True
             )
 
+            return
 
-            schedule = get_schedule(
-                schedule_id
+        # =====================================================
+        # 핵심 보안 로직
+        # =====================================================
+
+        # 서버가 다른 경우 차단
+        if schedule["guild_id"] != interaction.guild.id:
+
+            await interaction.response.send_message(
+                "❌ 다른 서버의 일정은 수정/삭제할 수 없습니다.",
+                ephemeral=True
             )
 
+            return
 
-            if schedule is None:
+        # 본인 일정이 아닌 경우
+        if schedule["discord_user_id"] != interaction.user.id:
+
+            # 서버 관리자만 허용
+            if not is_server_admin(interaction.user):
 
                 await interaction.response.send_message(
-                    "❌ 해당 일정을 찾을 수 없습니다.",
+                    "❌ 다른 사람의 일정은 수정하거나 삭제할 수 없습니다.",
                     ephemeral=True
                 )
 
                 return
 
+        # =====================================================
+        # 수정
+        # =====================================================
 
-            # =================================================
-            # 수정
-            # =================================================
+        if self.mode == "edit":
 
-            if self.mode == "edit":
+            await interaction.response.send_message(
+                (
+                    f"수정할 일정\n\n"
+                    f"닉네임: **{schedule['nickname']}**\n"
+                    f"현재 직업: **{schedule['job']}**\n"
+                    f"현재 날짜: **{format_date(schedule['schedule_date'])}**\n\n"
+                    f"새 직업을 선택해주세요."
+                ),
+                view=JobSelectView(
+                    nickname=schedule["nickname"],
+                    user_id=schedule["discord_user_id"],
+                    guild_id=schedule["guild_id"],
+                    mode="edit",
+                    schedule_id=schedule["id"]
+                ),
+                ephemeral=True
+            )
 
-                # 본인 일정이 아니면 관리자만 가능
-                if (
-                    schedule["discord_user_id"]
-                    != interaction.user.id
-                    and
-                    not interaction.user.guild_permissions.manage_guild
-                ):
+        # =====================================================
+        # 삭제
+        # =====================================================
 
-                    await interaction.response.send_message(
-                        "❌ 이 일정을 수정할 권한이 없습니다.",
-                        ephemeral=True
-                    )
+        elif self.mode == "delete":
 
-                    return
-
-
-                view = JobSelectView(
-                    interaction.user.id,
-                    schedule["nickname"],
-                    schedule_id
-                )
-
-
-                await interaction.response.edit_message(
-                    content=(
-                        "✏️ **수정할 직업을 선택해주세요.**\n\n"
-
-                        f"👤 닉네임: **{schedule['nickname']}**\n"
-
-                        f"⚔️ 현재 직업: **{schedule['job']}**\n"
-
-                        f"📅 현재 날짜: "
-                        f"**{format_date(schedule['schedule_date'])}**"
-                    ),
-                    view=view
-                )
-
-
-            # =================================================
-            # 삭제
-            # =================================================
-
-            elif self.mode == "delete":
-
-                # 본인 일정이 아니면 관리자만 가능
-                if (
-                    schedule["discord_user_id"]
-                    != interaction.user.id
-                    and
-                    not interaction.user.guild_permissions.manage_guild
-                ):
-
-                    await interaction.response.send_message(
-                        "❌ 이 일정을 삭제할 권한이 없습니다.",
-                        ephemeral=True
-                    )
-
-                    return
-
-
-                view = DeleteConfirmView(
-                    interaction.user.id,
-                    schedule_id
-                )
-
-
-                await interaction.response.edit_message(
-                    content=(
-                        "🗑️ **정말 삭제하시겠습니까?**\n\n"
-
-                        f"👤 닉네임: **{schedule['nickname']}**\n"
-
-                        f"⚔️ 직업: **{schedule['job']}**\n"
-
-                        f"📅 날짜: "
-                        f"**{format_date(schedule['schedule_date'])}**"
-                    ),
-                    view=view
-                )
-
-
-        select.callback = callback
-
-        self.add_item(select)
+            await interaction.response.send_message(
+                (
+                    f"정말 이 일정을 삭제할까요?\n\n"
+                    f"닉네임: **{schedule['nickname']}**\n"
+                    f"직업: **{schedule['job']}**\n"
+                    f"날짜: **{format_date(schedule['schedule_date'])}**"
+                ),
+                view=DeleteConfirmView(
+                    schedule_id=schedule["id"],
+                    owner_id=schedule["discord_user_id"]
+                ),
+                ephemeral=True
+            )
 
 
 # =========================================================
-# 16. 삭제 확인 View
+# 삭제 확인
 # =========================================================
 
 class DeleteConfirmView(discord.ui.View):
 
     def __init__(
         self,
-        user_id,
-        schedule_id
+        schedule_id,
+        owner_id
     ):
-
-        super().__init__(
-            timeout=60
-        )
-
-        self.user_id = user_id
+        super().__init__(timeout=60)
 
         self.schedule_id = schedule_id
+        self.owner_id = owner_id
 
-
-    # =====================================================
-    # 삭제
-    # =====================================================
-
-    @discord.ui.button(
-        label="삭제",
-        emoji="🗑️",
-        style=discord.ButtonStyle.danger
-    )
-    async def confirm_delete(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        schedule = get_schedule(
-            self.schedule_id
+        yes_button = discord.ui.Button(
+            label="삭제",
+            style=discord.ButtonStyle.danger
         )
 
+        no_button = discord.ui.Button(
+            label="취소",
+            style=discord.ButtonStyle.secondary
+        )
 
-        if schedule is None:
+        async def yes_callback(interaction):
+
+            schedule = get_schedule(self.schedule_id)
+
+            if schedule is None:
+
+                await interaction.response.edit_message(
+                    content="❌ 이미 삭제된 일정입니다.",
+                    view=None
+                )
+
+                return
+
+            # 서버 확인
+            if schedule["guild_id"] != interaction.guild.id:
+
+                await interaction.response.edit_message(
+                    content="❌ 다른 서버의 일정은 삭제할 수 없습니다.",
+                    view=None
+                )
+
+                return
+
+            # 본인인지 확인
+            if schedule["discord_user_id"] != interaction.user.id:
+
+                # 관리자가 아니면 차단
+                if not is_server_admin(interaction.user):
+
+                    await interaction.response.edit_message(
+                        content="❌ 다른 사람의 일정은 삭제할 수 없습니다.",
+                        view=None
+                    )
+
+                    return
+
+            success = delete_schedule(self.schedule_id)
+
+            if success:
+
+                await interaction.response.edit_message(
+                    content="✅ 일정이 삭제되었습니다.",
+                    view=None
+                )
+
+            else:
+
+                await interaction.response.edit_message(
+                    content="❌ 일정 삭제에 실패했습니다.",
+                    view=None
+                )
+
+        async def no_callback(interaction):
 
             await interaction.response.edit_message(
-                content="❌ 이미 삭제된 일정입니다.",
+                content="❎ 삭제를 취소했습니다.",
                 view=None
             )
 
-            return
+        yes_button.callback = yes_callback
+        no_button.callback = no_callback
 
-
-        # 본인 또는 관리자만 삭제 가능
-        if (
-            schedule["discord_user_id"]
-            != interaction.user.id
-            and
-            not interaction.user.guild_permissions.manage_guild
-        ):
-
-            await interaction.response.send_message(
-                "❌ 이 일정을 삭제할 권한이 없습니다.",
-                ephemeral=True
-            )
-
-            return
-
-
-        delete_schedule(
-            self.schedule_id
-        )
-
-
-        await interaction.response.edit_message(
-            content="🗑️ **일정이 삭제되었습니다.**",
-            view=None
-        )
-
-        self.stop()
-
-
-    # =====================================================
-    # 취소
-    # =====================================================
-
-    @discord.ui.button(
-        label="취소",
-        emoji="↩️",
-        style=discord.ButtonStyle.secondary
-    )
-    async def cancel_delete(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        await interaction.response.edit_message(
-            content="❎ 삭제를 취소했습니다.",
-            view=None
-        )
-
-        self.stop()
+        self.add_item(yes_button)
+        self.add_item(no_button)
 
 
 # =========================================================
-# 17. 일정 출력
+# Bot 설정
 # =========================================================
 
-def make_schedule_text(
-    schedules,
-    title="📅 일정"
-):
+intents = discord.Intents.default()
+intents.message_content = True
 
-    if not schedules:
-
-        return (
-            f"**{title}**\n\n"
-            "등록된 일정이 없습니다."
-        )
-
-
-    lines = []
-
-    lines.append(
-        f"**{title}**"
-    )
-
-    lines.append("")
-
-
-    current_date = None
-
-
-    for schedule in schedules:
-
-        date_text = schedule["schedule_date"]
-
-
-        # 날짜가 바뀌면 날짜 제목 표시
-        if date_text != current_date:
-
-            if current_date is not None:
-
-                lines.append("")
-
-
-            lines.append(
-                f"### 📅 {format_date(date_text)}"
-            )
-
-            current_date = date_text
-
-
-        lines.append(
-            f"• **{schedule['nickname']}** "
-            f"| {schedule['job']}"
-        )
-
-
-    return "\n".join(lines)
+bot = commands.Bot(
+    command_prefix="!",
+    intents=intents
+)
 
 
 # =========================================================
-# 18. !등록
+# !등록
 # =========================================================
 
 @bot.command(name="등록")
-async def register_command(
+async def register_schedule(
     ctx,
-    *,
-    nickname: str
+    nickname: str = None
 ):
 
-    nickname = nickname.strip()
-
-
-    if not nickname:
+    if nickname is None:
 
         await ctx.send(
-            "❌ 닉네임을 입력해주세요.\n\n"
-            "예: `!등록 김법사`"
+            "사용법:\n"
+            "`!등록 닉네임`\n\n"
+            "예시:\n"
+            "`!등록 홍길동`"
         )
 
         return
 
+    nickname = nickname.strip()
 
-    view = JobSelectView(
-        ctx.author.id,
-        nickname
-    )
+    if not nickname:
 
+        await ctx.send(
+            "❌ 닉네임을 입력해주세요."
+        )
+
+        return
 
     await ctx.send(
-        (
-            f"📝 **{nickname}**님의 "
-            "직업을 선택해주세요."
-        ),
-        view=view
+        f"**{nickname}** 님의 일정을 등록합니다.\n"
+        f"직업을 선택해주세요.",
+        view=JobSelectView(
+            nickname=nickname,
+            user_id=ctx.author.id,
+            guild_id=ctx.guild.id,
+            mode="register"
+        )
     )
 
 
 # =========================================================
-# 19. !일정
+# !일정
 # =========================================================
 
 @bot.command(name="일정")
-async def schedule_command(
+async def show_schedule(
     ctx,
-    *,
     nickname: str = None
 ):
 
-    if nickname:
+    schedules = get_all_schedules(ctx.guild.id)
+
+    if nickname is not None:
 
         nickname = nickname.strip()
 
-        schedules = get_nickname_schedules(
-            ctx.author.id,
-            nickname
-        )
+        schedules = [
+            schedule
+            for schedule in schedules
+            if schedule["nickname"] == nickname
+        ]
 
-        title = (
-            f"📅 {nickname}님의 일정"
-        )
+    if not schedules:
 
-    else:
+        if nickname:
 
-        schedules = get_user_schedules(
-            ctx.author.id
-        )
+            await ctx.send(
+                f"📅 **{nickname}** 님의 등록된 일정이 없습니다."
+            )
 
-        title = "📅 내 일정"
+        else:
 
+            await ctx.send(
+                "📅 등록된 일정이 없습니다."
+            )
 
-    text = make_schedule_text(
-        schedules,
-        title
+        return
+
+    # 날짜별 그룹
+    grouped = {}
+
+    for schedule in schedules:
+
+        date = schedule["schedule_date"]
+
+        if date not in grouped:
+            grouped[date] = []
+
+        grouped[date].append(schedule)
+
+    embed = discord.Embed(
+        title="📅 일정",
+        description="현재 서버에 등록된 일정입니다.",
+        color=discord.Color.blue()
     )
 
+    for date in sorted(grouped.keys()):
+
+        lines = []
+
+        for schedule in grouped[date]:
+
+            lines.append(
+                f"• **{schedule['nickname']}** — {schedule['job']}"
+            )
+
+        embed.add_field(
+            name=format_date(date),
+            value="\n".join(lines),
+            inline=False
+        )
 
     await ctx.send(
-        text
+        embed=embed
     )
 
 
 # =========================================================
-# 20. !전체일정
+# !전체일정
 # =========================================================
 
 @bot.command(name="전체일정")
-async def all_schedule_command(
-    ctx
-):
+async def show_all_schedule(ctx):
 
-    schedules = get_all_schedules()
-
+    schedules = get_all_schedules(ctx.guild.id)
 
     if not schedules:
 
@@ -1180,87 +928,73 @@ async def all_schedule_command(
 
         return
 
+    grouped = {}
 
-    text = make_schedule_text(
-        schedules,
-        "📅 전체 일정"
+    for schedule in schedules:
+
+        date = schedule["schedule_date"]
+
+        if date not in grouped:
+            grouped[date] = []
+
+        grouped[date].append(schedule)
+
+    embed = discord.Embed(
+        title="📅 서버 전체 일정",
+        color=discord.Color.green()
+    )
+
+    for date in sorted(grouped.keys()):
+
+        lines = []
+
+        for schedule in grouped[date]:
+
+            lines.append(
+                f"• **{schedule['nickname']}** — {schedule['job']}"
+            )
+
+        embed.add_field(
+            name=format_date(date),
+            value="\n".join(lines),
+            inline=False
+        )
+
+    await ctx.send(
+        embed=embed
     )
 
 
-    # Discord 메시지 길이 제한 대응
-    if len(text) <= 2000:
-
-        await ctx.send(
-            text
-        )
-
-        return
-
-
-    chunks = []
-
-    current = ""
-
-
-    for line in text.split("\n"):
-
-        if (
-            len(current)
-            + len(line)
-            + 1
-            > 1900
-        ):
-
-            chunks.append(
-                current
-            )
-
-            current = ""
-
-
-        current += line + "\n"
-
-
-    if current:
-
-        chunks.append(
-            current
-        )
-
-
-    for chunk in chunks:
-
-        await ctx.send(
-            chunk
-        )
-
-
 # =========================================================
-# 21. !수정
+# !수정
 # =========================================================
 
 @bot.command(name="수정")
-async def edit_command(
-    ctx,
-    *,
-    nickname: str = None
-):
+async def edit_schedule(ctx):
 
-    if nickname:
+    # 일반 사용자는 자신의 일정만
+    # 관리자는 서버 전체 일정을 선택 가능
 
-        nickname = nickname.strip()
+    if is_server_admin(ctx.author):
 
-        schedules = get_nickname_schedules(
-            ctx.author.id,
-            nickname
+        schedules = get_all_schedules(ctx.guild.id)
+
+        title = (
+            "🛠️ 일정 수정\n"
+            "관리자 권한으로 서버 전체 일정이 표시됩니다."
         )
 
     else:
 
         schedules = get_user_schedules(
+            ctx.guild.id,
             ctx.author.id
         )
 
+        title = (
+            "🛠️ 일정 수정\n"
+            "본인이 등록한 일정만 표시됩니다."
+        )
 
     if not schedules:
 
@@ -1270,45 +1004,46 @@ async def edit_command(
 
         return
 
-
-    view = ScheduleSelectView(
-        schedules,
-        mode="edit"
-    )
-
-
     await ctx.send(
-        "✏️ **수정할 일정을 선택해주세요.**",
-        view=view
+        title,
+        view=ScheduleSelectView(
+            schedules=schedules,
+            mode="edit",
+            requester_id=ctx.author.id
+        )
     )
 
 
 # =========================================================
-# 22. !삭제
+# !삭제
 # =========================================================
 
 @bot.command(name="삭제")
-async def delete_command(
-    ctx,
-    *,
-    nickname: str = None
-):
+async def delete_schedule_command(ctx):
 
-    if nickname:
+    # 일반 사용자는 자신의 일정만
+    # 관리자는 서버 전체 일정 선택 가능
 
-        nickname = nickname.strip()
+    if is_server_admin(ctx.author):
 
-        schedules = get_nickname_schedules(
-            ctx.author.id,
-            nickname
+        schedules = get_all_schedules(ctx.guild.id)
+
+        title = (
+            "🗑️ 일정 삭제\n"
+            "관리자 권한으로 서버 전체 일정이 표시됩니다."
         )
 
     else:
 
         schedules = get_user_schedules(
+            ctx.guild.id,
             ctx.author.id
         )
 
+        title = (
+            "🗑️ 일정 삭제\n"
+            "본인이 등록한 일정만 표시됩니다."
+        )
 
     if not schedules:
 
@@ -1318,90 +1053,67 @@ async def delete_command(
 
         return
 
-
-    view = ScheduleSelectView(
-        schedules,
-        mode="delete"
-    )
-
-
     await ctx.send(
-        "🗑️ **삭제할 일정을 선택해주세요.**",
-        view=view
+        title,
+        view=ScheduleSelectView(
+            schedules=schedules,
+            mode="delete",
+            requester_id=ctx.author.id
+        )
     )
 
 
 # =========================================================
-# 23. !도움말
+# !내일정
 # =========================================================
 
-@bot.command(name="도움말")
-async def help_command(
-    ctx
-):
+@bot.command(name="내일정")
+async def my_schedule(ctx):
+
+    schedules = get_user_schedules(
+        ctx.guild.id,
+        ctx.author.id
+    )
+
+    if not schedules:
+
+        await ctx.send(
+            "📅 등록한 일정이 없습니다."
+        )
+
+        return
+
+    grouped = {}
+
+    for schedule in schedules:
+
+        date = schedule["schedule_date"]
+
+        if date not in grouped:
+            grouped[date] = []
+
+        grouped[date].append(schedule)
 
     embed = discord.Embed(
-        title="📚 일정 관리 봇",
-        description=(
-            "캐릭터별 일정을 등록하고 "
-            "수정/삭제할 수 있습니다."
-        ),
-        color=discord.Color.blue()
+        title=f"📅 {ctx.author.display_name}님의 일정",
+        color=discord.Color.blurple()
     )
 
+    for date in sorted(grouped.keys()):
 
-    embed.add_field(
-        name="📝 일정 등록",
-        value=(
-            "`!등록 닉네임`\n"
-            "직업 → 날짜 선택 → 등록"
-        ),
-        inline=False
-    )
+        lines = []
 
+        for schedule in grouped[date]:
 
-    embed.add_field(
-        name="📅 일정 조회",
-        value=(
-            "`!일정` - 내 전체 일정\n"
-            "`!일정 닉네임` - 특정 캐릭터 일정\n"
-            "`!전체일정` - 서버 전체 일정"
-        ),
-        inline=False
-    )
+            lines.append(
+                f"• **{schedule['nickname']}** — {schedule['job']}"
+            )
 
-
-    embed.add_field(
-        name="✏️ 일정 수정",
-        value=(
-            "`!수정` - 내 일정 중 선택\n"
-            "`!수정 닉네임` - 특정 캐릭터 일정 수정"
-        ),
-        inline=False
-    )
-
-
-    embed.add_field(
-        name="🗑️ 일정 삭제",
-        value=(
-            "`!삭제` - 내 일정 중 선택\n"
-            "`!삭제 닉네임` - 특정 캐릭터 일정 삭제"
-        ),
-        inline=False
-    )
-
-
-    embed.add_field(
-        name="🔒 권한",
-        value=(
-            "일반 사용자는 자신의 일정만 "
-            "수정/삭제할 수 있습니다.\n"
-            "서버 관리 권한이 있는 사용자는 "
-            "다른 사람의 일정도 관리할 수 있습니다."
-        ),
-        inline=False
-    )
-
+        embed.add_field(
+            name=format_date(date),
+            value="\n".join(lines),
+            inline=False
+        )
 
     await ctx.send(
         embed=embed
@@ -1409,102 +1121,116 @@ async def help_command(
 
 
 # =========================================================
-# 24. 명령어 오류 처리
+# !도움말
 # =========================================================
 
-@bot.event
-async def on_command_error(
-    ctx,
-    error
-):
+@bot.command(name="도움말")
+async def help_command(ctx):
 
-    # 존재하지 않는 명령어는 무시
-    if isinstance(
-        error,
-        commands.CommandNotFound
-    ):
+    embed = discord.Embed(
+        title="📖 일정 봇 명령어",
+        color=discord.Color.gold()
+    )
 
-        return
+    embed.add_field(
+        name="📌 일정 등록",
+        value=(
+            "`!등록 닉네임`\n"
+            "본인의 일정을 등록합니다."
+        ),
+        inline=False
+    )
 
+    embed.add_field(
+        name="📅 일정 확인",
+        value=(
+            "`!일정` — 서버 전체 일정\n"
+            "`!일정 닉네임` — 특정 닉네임 일정\n"
+            "`!내일정` — 내가 등록한 일정\n"
+            "`!전체일정` — 서버 전체 일정"
+        ),
+        inline=False
+    )
 
-    # 필수 인자가 없는 경우
-    if isinstance(
-        error,
-        commands.MissingRequiredArgument
-    ):
+    embed.add_field(
+        name="🛠️ 일정 관리",
+        value=(
+            "`!수정` — 일정 수정\n"
+            "`!삭제` — 일정 삭제"
+        ),
+        inline=False
+    )
 
-        await ctx.send(
-            (
-                "❌ 닉네임을 입력해주세요.\n\n"
-                "예: `!등록 김법사`\n"
-                "`!도움말`을 입력하면 "
-                "전체 명령어를 볼 수 있습니다."
-            )
-        )
+    embed.add_field(
+        name="🔐 권한",
+        value=(
+            "일반 사용자는 자신의 일정만 수정/삭제할 수 있습니다.\n"
+            "서버 관리 권한이 있는 관리자는 다른 사람의 일정도 수정/삭제할 수 있습니다."
+        ),
+        inline=False
+    )
 
-        return
-
-
-    print(
-        f"[COMMAND ERROR] "
-        f"{type(error).__name__}: {error}"
+    await ctx.send(
+        embed=embed
     )
 
 
 # =========================================================
-# 25. Bot Ready
+# 명령어 오류 처리
+# =========================================================
+
+@bot.event
+async def on_command_error(ctx, error):
+
+    if isinstance(error, commands.CommandNotFound):
+        return
+
+    if isinstance(error, commands.MissingRequiredArgument):
+
+        await ctx.send(
+            "❌ 명령어 사용법이 잘못되었습니다.\n"
+            "`!도움말`을 입력해서 사용법을 확인해주세요."
+        )
+
+        return
+
+    print(f"Command Error: {error}")
+
+
+# =========================================================
+# Bot 시작
 # =========================================================
 
 @bot.event
 async def on_ready():
 
-    print(
-        f"로그인 완료: {bot.user} "
-        f"(ID: {bot.user.id})"
-    )
-
-    print(
-        f"SQLite DB: "
-        f"{os.path.abspath(DB_FILE)}"
-    )
+    print("--------------------------------")
+    print(f"로그인 성공: {bot.user}")
+    print(f"Bot ID: {bot.user.id}")
+    print("--------------------------------")
 
 
 # =========================================================
-# 26. 실행
+# Main
 # =========================================================
 
 if __name__ == "__main__":
 
-    # SQLite DB 생성
     init_db()
 
-
-    # Flask 서버 시작
     flask_thread = threading.Thread(
-        target=run_flask
+        target=run_flask,
+        daemon=True
     )
-
-    flask_thread.daemon = True
 
     flask_thread.start()
 
+    token = os.getenv("DISCORD_TOKEN")
 
-    # Discord Token
-    token = os.environ.get(
-        "DISCORD_TOKEN"
-    )
+    if not token:
 
-
-    if token:
-
-        bot.run(
-            token
-        )
+        print("❌ DISCORD_TOKEN 환경변수가 없습니다.")
 
     else:
 
-        print(
-            "❌ 오류: "
-            "DISCORD_TOKEN 환경 변수가 "
-            "설정되지 않았습니다."
-        )
+        bot.run(token)
