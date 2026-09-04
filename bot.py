@@ -4,7 +4,7 @@ from discord.ext import commands
 from flask import Flask
 from threading import Thread
 
-# 1. 24시간 유지를 위한 웹 서버 설정
+# 1. 24시간 유지를 위한 웹 서버 설정 (Render용)
 app = Flask('')
 
 @app.route('/')
@@ -18,6 +18,7 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
+# 2. 디스코드 인텐트 설정 (Message Content 필수)
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -69,13 +70,13 @@ async def on_ready():
 async def 안녕(ctx):
     await ctx.send('안녕하세요! 레이드 관리 봇입니다.')
 
-# 💡 1단계: 등록 시작 (예: !등록시작 양도르술사)
+# 💡 1단계: 등록 시작 (예: !등록시작 라니새싹)
 @bot.command()
 async def 등록시작(ctx, nickname: str):
     view = JobSelectView(nickname)
     await ctx.send(f"🎮 **{nickname}**님의 캐릭터 등록을 시작합니다. 아래 메뉴에서 **직업**을 선택해 주세요!", view=view)
 
-# 💡 2단계: 요일별 일정 입력 (예: !일정등록 양도르술사 월요일 월양)
+# 💡 2단계: 요일별 일정 입력 (예: !일정등록 라니새싹 월요일 월양)
 @bot.command()
 async def 일정등록(ctx, nickname: str, day: str, status: str):
     valid_days = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일", "월", "화", "수", "목", "금", "토", "일"]
