@@ -232,24 +232,15 @@ def is_server_admin(member):
 
 
 # =========================================================
-# UI 컴포넌트 (캐릭터 선택 -> 레이드 선택 -> 직업 -> 날짜)
+# UI 컴포넌트
 # =========================================================
 
-# 0단계: 등록된 내 캐릭터 선택
 class CharacterSelect(discord.ui.Select):
     def __init__(self, characters):
-        options = []
-        for char in characters:
-            options.append(
-                discord.SelectOption(
-                    label=f"{char['nickname']} ({char['default_job']})",
-                    value=str(char['id'])
-                )
-            )
+        options = [discord.SelectOption(label=f"{char['nickname']} ({char['default_job']})", value=str(char['id'])) for char in characters]
         super().__init__(placeholder="일정을 등록할 캐릭터를 선택하세요", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        # 선택된 캐릭터 정보 찾기
         conn = get_db()
         char = conn.execute("SELECT * FROM characters WHERE id = ?", (int(self.values[0]),)).fetchone()
         conn.close()
@@ -258,7 +249,6 @@ class CharacterSelect(discord.ui.Select):
             await interaction.response.edit_message(content="❌ 캐릭터 정보를 찾을 수 없습니다.", view=None)
             return
 
-        # 다음 단계(레이드 선택)로 이동하며 캐릭터 닉네임과 기본 직업을 전달
         await interaction.response.edit_message(
             content=f"선택 캐릭터: **{char['nickname']}** ({char['default_job']})\n참여할 **레이드**를 선택해주세요.",
             view=RaidSelectView(nickname=char['nickname'], job=char['default_job'], user_id=interaction.user.id, guild_id=interaction.guild.id, mode="register")
@@ -271,11 +261,11 @@ class CharacterSelectView(discord.ui.View):
         self.add_item(CharacterSelect(characters))
 
 
-# 1단계: 레이드 선택
 class RaidSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=raid, value=raid) for raid in RAIDS]
         super().__init__(placeholder="레이드를 선택하세요", min_values=1, max_values=1, options=options)
+
 
 class RaidSelectView(discord.ui.View):
     def __init__(self, nickname, job, user_id, guild_id, mode="register", schedule_id=None):
@@ -299,7 +289,6 @@ class RaidSelectView(discord.ui.View):
         )
 
 
-# 2단계: 날짜 선택 및 완료
 class DateSelectView(discord.ui.View):
     def __init__(self, nickname, user_id, guild_id, raid, job, mode="register", schedule_id=None):
         super().__init__(timeout=180)
@@ -371,7 +360,6 @@ class DateSelectView(discord.ui.View):
         self.add_item(confirm_button)
 
 
-# 캐릭터 삭제용 뷰
 class CharacterDeleteSelect(discord.ui.Select):
     def __init__(self, characters):
         options = [discord.SelectOption(label=f"{c['nickname']} ({c['default_job']})", value=str(c['id'])) for c in characters]
@@ -390,18 +378,16 @@ class CharacterDeleteView(discord.ui.View):
         self.add_item(CharacterDeleteSelect(characters))
 
 
-# 일정 수정/삭제 선택 뷰
 class ScheduleSelect(discord.ui.Select):
     def __init__(self, schedules):
-        options = []
-        for schedule in schedules[:25]:
-            options.append(
-                discord.SelectOption(
-                    label=f"[{schedule['raid']}] {schedule['nickname']} / {schedule['job']} / {format_date(schedule['schedule_date'])}"[:100],
-                    value=str(schedule["id"])
-                )
-            )
+        options = [
+            discord.SelectOption(
+                label=f"[{schedule['raid']}] {schedule['nickname']} / {schedule['job']} / {format_date(schedule['schedule_date'])}"[:100],
+                value=str(schedule["id"])
+            ) for schedule in schedules[:25]
+        ]
         super().__init__(placeholder="일정을 선택하세요", min_values=1, max_values=1, options=options)
+
 
 class ScheduleSelectView(discord.ui.View):
     def __init__(self, schedules, mode="edit"):
@@ -460,7 +446,7 @@ class DeleteConfirmView(discord.ui.View):
 
 
 # =========================================================
-# Bot 설정 및 슬래시 커맨드
+# Bot 설정 및 슬래시 커맨드 (서버 즉시 동기화 적용)
 # =========================================================
 
 intents = discord.Intents.default()
@@ -471,15 +457,17 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash commands(s)")
-    except Exception as e:
-        print(e)
     print(f"로그인 성공: {bot.user}")
+    # 모든 서버(Guild)에 슬래시 커맨드를 즉시 동기화
+    for guild in bot.guilds:
+        try:
+            bot.tree.copy_global_to(guild=guild)
+            await bot.tree.sync(guild=guild)
+            print(f"[{guild.name}] 서버 슬래시 커맨드 즉시 동기화 완료!")
+        except Exception as e:
+            print(f"[{guild.name}] 동기화 실패: {e}")
 
 
-# 1. 캐릭터 등록 명령어
 @bot.tree.command(name="캐릭터등록", description="사용할 캐릭터와 기본 직업을 등록합니다.")
 @app_commands.describe(nickname="게임 내 닉네임", job="캐릭터 직업")
 @app_commands.choices(job=[app_commands.Choice(name=j, value=j) for j in JOBS])
@@ -491,10 +479,8 @@ async def slash_register_character(interaction: discord.Interaction, nickname: s
     await interaction.response.send_message(f"✅ 캐릭터가 등록되었습니다!\n- 닉네임: **{nickname.strip()}**\n- 직업: **{job}**\n이제 `/등록` 명령어로 편하게 일정을 잡아보세요.", ephemeral=True)
 
 
-# 2. 캐릭터 삭제/관리 명령어
 @bot.tree.command(name="캐릭터관리", description="등록한 내 캐릭터를 관리(삭제)합니다.")
 async def slash_manage_character(interaction: discord.Interaction):
-    chars = get_user_schedules(interaction.guild.id, interaction.user.id) # user chars check
     conn = get_db()
     chars = conn.execute("SELECT * FROM characters WHERE guild_id = ? AND discord_user_id = ?", (interaction.guild.id, interaction.user.id)).fetchall()
     conn.close()
@@ -505,10 +491,8 @@ async def slash_manage_character(interaction: discord.Interaction):
     await interaction.response.send_message("🗑️ 삭제할 캐릭터를 선택해주세요.", view=CharacterDeleteView(chars), ephemeral=True)
 
 
-# 3. 일정 등록 명령어 (캐릭터 선택 방식)
 @bot.tree.command(name="등록", description="등록된 캐릭터를 선택해 레이드 일정을 등록합니다.")
 async def slash_register(interaction: discord.Interaction):
-    chars = get_user_schedules(interaction.guild.id, interaction.user.id)
     conn = get_db()
     chars = conn.execute("SELECT * FROM characters WHERE guild_id = ? AND discord_user_id = ?", (interaction.guild.id, interaction.user.id)).fetchall()
     conn.close()
